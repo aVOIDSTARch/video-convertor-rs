@@ -1,1 +1,8 @@
 ## This file contains the ideas for this specific project
+This project will implement a rust program that uses the ffmpeg library to create a comprehensive media conversion library.
+
+It will need a Web API interface, a cli, a MCP server and a plugin for the tts hub on alexandria.
+
+Do your research and design a thorough plan. Do not execute until explicit approval in given and this project is restricted to teh video-convertor-rs folder for writing but you can read the alexandria dir tree for designing if you need.
+
+Please ask questions after analysis before finalizing your plan. You will need to research the ffmpeg codec webpage to make this work well.
