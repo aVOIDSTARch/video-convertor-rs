@@ -1,0 +1,13 @@
+[plugin]
+name = "media-convertor"
+version = "0.1.0"
+type = "converter"
+description = "Audio format converter powered by FFmpeg"
+binary = "media-convertor-plugin"
+
+[options]
+codec = { type = "string", default = "mp3", description = "Output codec (mp3, aac, flac, opus, wav, pcm16le)" }
+bitrate = { type = "string", default = "", description = "Audio bitrate (e.g. 128000, 64k)" }
+sample_rate = { type = "string", default = "", description = "Sample rate in Hz (e.g. 44100, 48000)" }
+channels = { type = "string", default = "", description = "Number of audio channels (1 or 2)" }
+preset = { type = "string", default = "", description = "Named preset (overrides other options)" }

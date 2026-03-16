@@ -1,10 +1,9 @@
-# [project-title]
+# video-convertor-rs
 
 ## Project Information
 
-- Project Author(s) [authors]
-- Creation Date [created-on]
-- Purpose of Project [purpose]
-- Primary Coding Language [lang]
-- Github Repository URL [repo-url]
-
+- Project Author(s) Louis Casinelli Jr
+- Creation Date March 14, 2026
+- Purpose of Project FFMPEG Implementation in Rust
+- Primary Coding Language Rust
+- Github Repository URL https://github.com/aVOIDSTARch/video-convertor-rs

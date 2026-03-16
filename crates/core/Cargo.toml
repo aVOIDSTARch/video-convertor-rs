@@ -1,0 +1,30 @@
+[package]
+name = "media-convertor-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Media conversion library powered by FFmpeg: transcode, probe, presets, audio/video operations"
+
+[features]
+default = []
+ffmpeg = ["dep:ffmpeg-next"]
+bundled = [
+    "ffmpeg",
+    "ffmpeg-next/build", "ffmpeg-next/static",
+    "ffmpeg-next/build-lib-x264", "ffmpeg-next/build-lib-x265",
+    "ffmpeg-next/build-lib-opus", "ffmpeg-next/build-lib-vorbis",
+    "ffmpeg-next/build-lib-fdk-aac", "ffmpeg-next/build-lib-dav1d",
+    "ffmpeg-next/build-license-gpl",
+]
+system-ffmpeg = ["ffmpeg"]
+integration = []
+
+[dependencies]
+ffmpeg-next = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

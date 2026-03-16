@@ -1,0 +1,22 @@
+[package]
+name = "media-convertor-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Media conversion MCP server: stdio JSON-RPC with convert, probe, extract tools"
+
+[[bin]]
+name = "media-convertor-mcp"
+path = "src/main.rs"
+
+[features]
+default = []
+ffmpeg = ["media-convertor-core/ffmpeg"]
+bundled = ["media-convertor-core/bundled"]
+
+[dependencies]
+media-convertor-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

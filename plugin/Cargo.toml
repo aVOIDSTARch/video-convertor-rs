@@ -1,0 +1,18 @@
+[package]
+name = "media-convertor-plugin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TTS hub audio converter plugin powered by FFmpeg"
+
+[[bin]]
+name = "media-convertor-plugin"
+path = "src/main.rs"
+
+[features]
+default = []
+ffmpeg = ["media-convertor-core/ffmpeg"]
+bundled = ["media-convertor-core/bundled"]
+
+[dependencies]
+media-convertor-core.workspace = true
