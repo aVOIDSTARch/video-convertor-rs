@@ -99,174 +99,11 @@ pub enum StreamType {
     Unknown,
 }
 
-// ── FFmpeg-based probing ───────────────────────────────────────
-
-#[cfg(feature = "ffmpeg")]
-mod ffmpeg_probe {
-    use super::*;
-    use crate::error::ProbeError;
-
-    /// Probe a media file and return detailed information.
-    pub fn probe_file(path: &Path) -> std::result::Result<MediaInfo, ProbeError> {
-        crate::init();
-
-        let ctx = ffmpeg_next::format::input(&path).map_err(|e| {
-            ProbeError::OpenFailed(format!("{}: {}", path.display(), e))
-        })?;
-
-        let format_name = ctx.format().name().to_string();
-        let container = Container::from_path(path)
-            .or_else(|| guess_container_from_format(&format_name));
-
-        let duration = if ctx.duration() > 0 {
-            Some(Duration::from_micros(ctx.duration() as u64))
-        } else {
-            None
-        };
-
-        let bitrate = if ctx.bit_rate() > 0 {
-            Some(ctx.bit_rate() as u64)
-        } else {
-            None
-        };
-
-        let metadata = ctx
-            .metadata()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        let streams = ctx
-            .streams()
-            .enumerate()
-            .map(|(idx, stream)| build_stream_info(idx, &stream))
-            .collect();
-
-        Ok(MediaInfo {
-            container,
-            format_name,
-            duration,
-            bitrate,
-            streams,
-            metadata,
-        })
-    }
-
-    fn build_stream_info(
-        index: usize,
-        stream: &ffmpeg_next::format::stream::Stream,
-    ) -> StreamInfo {
-        let codec_params = stream.parameters();
-        let codec_ctx =
-            ffmpeg_next::codec::context::Context::from_parameters(codec_params.clone()).ok();
-
-        let medium = codec_params.medium();
-        let stream_type = match medium {
-            ffmpeg_next::media::Type::Video => StreamType::Video,
-            ffmpeg_next::media::Type::Audio => StreamType::Audio,
-            ffmpeg_next::media::Type::Subtitle => StreamType::Subtitle,
-            ffmpeg_next::media::Type::Data => StreamType::Data,
-            ffmpeg_next::media::Type::Attachment => StreamType::Attachment,
-            _ => StreamType::Unknown,
-        };
-
-        let codec_id = codec_params.id();
-        let codec_name = codec_id
-            .name()
-            .to_string();
-
-        let codec_long_name = ffmpeg_next::codec::decoder::find(codec_id)
-            .map(|c| c.long_name().to_string());
-
-        let bitrate = if stream.parameters().bit_rate() > 0 {
-            Some(stream.parameters().bit_rate() as u64)
-        } else {
-            None
-        };
-
-        let time_base = stream.time_base();
-        let duration = if stream.duration() > 0 {
-            let secs = stream.duration() as f64 * time_base.0 as f64 / time_base.1 as f64;
-            Some(Duration::from_secs_f64(secs))
-        } else {
-            None
-        };
-
-        let (width, height, fps, pixel_format) = if stream_type == StreamType::Video {
-            let w = codec_ctx.as_ref().and_then(|c| {
-                c.clone().decoder().ok().and_then(|d| d.video().ok().map(|v| v.width()))
-            });
-            let h = codec_ctx.as_ref().and_then(|c| {
-                c.clone().decoder().ok().and_then(|d| d.video().ok().map(|v| v.height()))
-            });
-            let rate = stream.avg_frame_rate();
-            let f = if rate.1 > 0 {
-                Some(rate.0 as f64 / rate.1 as f64)
-            } else {
-                None
-            };
-            let pf = codec_ctx.as_ref().and_then(|c| {
-                c.clone()
-                    .decoder()
-                    .ok()
-                    .and_then(|d| d.video().ok().map(|v| format!("{:?}", v.format())))
-            });
-            (w, h, f, pf)
-        } else {
-            (None, None, None, None)
-        };
-
-        let (sample_rate, channels, sample_format) = if stream_type == StreamType::Audio {
-            let sr = codec_ctx.as_ref().and_then(|c| {
-                c.clone()
-                    .decoder()
-                    .ok()
-                    .and_then(|d| d.audio().ok().map(|a| a.rate()))
-            });
-            let ch = codec_ctx.as_ref().and_then(|c| {
-                c.clone()
-                    .decoder()
-                    .ok()
-                    .and_then(|d| d.audio().ok().map(|a| a.channels() as u16))
-            });
-            let sf = codec_ctx.as_ref().and_then(|c| {
-                c.clone()
-                    .decoder()
-                    .ok()
-                    .and_then(|d| d.audio().ok().map(|a| format!("{:?}", a.format())))
-            });
-            (sr, ch, sf)
-        } else {
-            (None, None, None)
-        };
-
-        let metadata = stream
-            .metadata()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        StreamInfo {
-            index,
-            stream_type,
-            codec_name,
-            codec_long_name,
-            bitrate,
-            duration,
-            width,
-            height,
-            fps,
-            pixel_format,
-            sample_rate,
-            channels,
-            sample_format,
-            metadata,
-        }
-    }
-
-    fn guess_container_from_format(format_name: &str) -> Option<Container> {
-        let first = format_name.split(',').next().unwrap_or(format_name);
-        match first {
+/// Best-effort mapping from an ffprobe `format_name` (e.g. `"matroska,webm"`) to a
+/// known [`Container`]. Used by the ffprobe-backed probe in [`crate::ffmpeg::probe`].
+pub fn guess_container_from_format(format_name: &str) -> Option<Container> {
+    for part in format_name.split(',') {
+        let hit = match part.trim() {
             "matroska" | "webm" => Some(Container::Mkv),
             "mov" | "mp4" | "m4a" | "3gp" => Some(Container::Mp4),
             "avi" => Some(Container::Avi),
@@ -278,12 +115,13 @@ mod ffmpeg_probe {
             "mpegts" => Some(Container::Ts),
             "gif" => Some(Container::Gif),
             _ => None,
+        };
+        if hit.is_some() {
+            return hit;
         }
     }
+    None
 }
-
-#[cfg(feature = "ffmpeg")]
-pub use ffmpeg_probe::probe_file;
 
 #[cfg(test)]
 mod tests {

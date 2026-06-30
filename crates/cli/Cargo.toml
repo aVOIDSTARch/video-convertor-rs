@@ -3,16 +3,11 @@ name = "media-convertor-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Media conversion CLI: convert, probe, presets, batch processing"
+description = "media-convertor CLI: control plane for the FFmpeg shell — ops, queue, and server management"
 
 [[bin]]
 name = "media-convertor"
 path = "src/main.rs"
-
-[features]
-default = []
-ffmpeg = ["media-convertor-core/ffmpeg"]
-bundled = ["media-convertor-core/bundled"]
 
 [dependencies]
 media-convertor-core.workspace = true
@@ -23,3 +18,5 @@ serde_json.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+reqwest.workspace = true
+uuid.workspace = true

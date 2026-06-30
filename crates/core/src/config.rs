@@ -1,33 +1,129 @@
-//! Application-level configuration.
+//! Application-level configuration shared by the library, CLI, and server.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// Top-level configuration for media conversion.
+/// Default HTTP port for the API server.
+pub const DEFAULT_PORT: u16 = 3400;
+
+/// Top-level configuration controlling the engine, work directories, the queue,
+/// resource limits, and the (optional) HTTP server surface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
-pub struct AppConfig {
-    /// Temporary directory for intermediate files. None = system default.
-    pub temp_dir: Option<PathBuf>,
-    /// Maximum number of concurrent transcode jobs (server mode).
-    pub max_concurrent_jobs: usize,
-    /// FFmpeg thread count per job. 0 = auto (ffmpeg decides).
+pub struct Config {
+    /// Explicit path to the `ffmpeg` binary. `None` = resolve `ffmpeg` on `PATH`.
+    pub ffmpeg_path: Option<PathBuf>,
+    /// Explicit path to the `ffprobe` binary. `None` = resolve `ffprobe` on `PATH`.
+    pub ffprobe_path: Option<PathBuf>,
+
+    /// Base working directory. Holds `uploads/`, `output/`, and `jobs/` sub-dirs.
+    pub work_dir: PathBuf,
+
+    /// Number of concurrent worker threads draining the queue.
+    pub workers: usize,
+    /// Per-job wall-clock timeout in seconds. 0 = no timeout.
+    pub job_timeout_secs: u64,
+    /// FFmpeg threads per job (passed as `-threads`). 0 = ffmpeg decides.
     pub threads: u32,
-    /// Whether to overwrite existing output files without prompting.
-    pub overwrite: bool,
-    /// Log level filter string (e.g. "info", "debug", "media_convertor_core=trace").
-    pub log_level: String,
+
+    /// Maximum accepted upload size in bytes (server multipart).
+    pub max_upload_bytes: u64,
+    /// Maximum produced output size in bytes (0 = unlimited).
+    pub max_output_bytes: u64,
+
+    /// Whether the gated raw-passthrough operation is permitted.
+    pub raw_enabled: bool,
+
+    /// Host the server binds to. Binding anything other than loopback requires `token`.
+    pub host: String,
+    /// Port the server binds to.
+    pub port: u16,
+    /// Bearer token required for API requests. Required to bind a non-loopback host.
+    pub token: Option<String>,
 }
 
-impl Default for AppConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
-            temp_dir: None,
-            max_concurrent_jobs: 4,
+            ffmpeg_path: None,
+            ffprobe_path: None,
+            work_dir: std::env::temp_dir().join("media-convertor"),
+            workers: 2,
+            job_timeout_secs: 3600,
             threads: 0,
-            overwrite: false,
-            log_level: "info".to_string(),
+            max_upload_bytes: 2 * 1024 * 1024 * 1024, // 2 GiB
+            max_output_bytes: 0,
+            raw_enabled: false,
+            host: "127.0.0.1".to_string(),
+            port: DEFAULT_PORT,
+            token: None,
         }
+    }
+}
+
+impl Config {
+    /// Directory holding uploaded input files.
+    pub fn upload_dir(&self) -> PathBuf {
+        self.work_dir.join("uploads")
+    }
+
+    /// Directory holding produced output files.
+    pub fn output_dir(&self) -> PathBuf {
+        self.work_dir.join("output")
+    }
+
+    /// Directory holding persisted job records (`{id}.json`).
+    pub fn jobs_dir(&self) -> PathBuf {
+        self.work_dir.join("jobs")
+    }
+
+    /// Path to the server pidfile (used by the CLI to manage a background server).
+    pub fn pid_file(&self) -> PathBuf {
+        self.work_dir.join("server.pid")
+    }
+
+    /// Path to the server logfile (used when started in the background).
+    pub fn log_file(&self) -> PathBuf {
+        self.work_dir.join("server.log")
+    }
+
+    /// Create all managed work sub-directories.
+    pub fn ensure_dirs(&self) -> std::io::Result<()> {
+        for d in [self.upload_dir(), self.output_dir(), self.jobs_dir()] {
+            std::fs::create_dir_all(d)?;
+        }
+        Ok(())
+    }
+
+    /// Whether the configured bind host is a loopback address.
+    pub fn is_loopback(&self) -> bool {
+        matches!(self.host.as_str(), "127.0.0.1" | "::1" | "localhost")
+    }
+
+    /// Job timeout as a `Duration`, or `None` when disabled.
+    pub fn job_timeout(&self) -> Option<std::time::Duration> {
+        if self.job_timeout_secs == 0 {
+            None
+        } else {
+            Some(std::time::Duration::from_secs(self.job_timeout_secs))
+        }
+    }
+
+    /// Validate the security posture of the server configuration.
+    ///
+    /// Refuses to expose a non-loopback host without a bearer token.
+    pub fn validate_server(&self) -> crate::Result<()> {
+        if !self.is_loopback() && self.host != "0.0.0.0" && self.token.is_none() {
+            // Any explicit non-loopback bind needs a token.
+        }
+        if !self.is_loopback() && self.token.is_none() {
+            return Err(crate::MediaError::security(format!(
+                "refusing to bind non-loopback host '{}' without a bearer token; \
+                 set a token or bind 127.0.0.1",
+                self.host
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -36,37 +132,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_config() {
-        let c = AppConfig::default();
-        assert!(c.temp_dir.is_none());
-        assert_eq!(c.max_concurrent_jobs, 4);
-        assert_eq!(c.threads, 0);
-        assert!(!c.overwrite);
-        assert_eq!(c.log_level, "info");
+    fn default_dirs_are_under_work_dir() {
+        let c = Config::default();
+        assert!(c.upload_dir().starts_with(&c.work_dir));
+        assert!(c.output_dir().starts_with(&c.work_dir));
+        assert!(c.jobs_dir().starts_with(&c.work_dir));
     }
 
     #[test]
-    fn serde_roundtrip() {
-        let c = AppConfig {
-            temp_dir: Some(PathBuf::from("/tmp/media")),
-            max_concurrent_jobs: 8,
-            threads: 4,
-            overwrite: true,
-            log_level: "debug".to_string(),
-        };
-        let json = serde_json::to_string(&c).unwrap();
-        let parsed: AppConfig = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.max_concurrent_jobs, 8);
-        assert_eq!(parsed.threads, 4);
-        assert!(parsed.overwrite);
+    fn loopback_detection() {
+        let mut c = Config::default();
+        assert!(c.is_loopback());
+        c.host = "0.0.0.0".to_string();
+        assert!(!c.is_loopback());
     }
 
     #[test]
-    fn deserialize_with_defaults() {
-        let json = r#"{"overwrite": true}"#;
-        let c: AppConfig = serde_json::from_str(json).unwrap();
-        assert!(c.overwrite);
-        assert_eq!(c.max_concurrent_jobs, 4); // default
-        assert_eq!(c.log_level, "info"); // default
+    fn non_loopback_without_token_is_rejected() {
+        let mut c = Config::default();
+        c.host = "192.168.1.10".to_string();
+        assert!(c.validate_server().is_err());
+        c.token = Some("secret".to_string());
+        assert!(c.validate_server().is_ok());
+    }
+
+    #[test]
+    fn loopback_needs_no_token() {
+        let c = Config::default();
+        assert!(c.validate_server().is_ok());
+    }
+
+    #[test]
+    fn timeout_zero_is_none() {
+        let mut c = Config::default();
+        c.job_timeout_secs = 0;
+        assert!(c.job_timeout().is_none());
+        c.job_timeout_secs = 5;
+        assert_eq!(c.job_timeout(), Some(std::time::Duration::from_secs(5)));
     }
 }

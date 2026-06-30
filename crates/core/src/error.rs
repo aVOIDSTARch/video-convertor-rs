@@ -12,16 +12,40 @@ pub enum MediaError {
     Transcode(#[from] TranscodeError),
     #[error("codec error: {0}")]
     Codec(#[from] CodecError),
-    #[error("filter error: {0}")]
-    Filter(#[from] FilterError),
     #[error("preset error: {0}")]
     Preset(#[from] PresetError),
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
+    /// The ffmpeg/ffprobe binary could not be located.
+    #[error("ffmpeg tool not found: {0}")]
+    ToolNotFound(String),
+    /// A security policy was violated (path escape, bad protocol, disallowed raw arg).
+    #[error("security violation: {0}")]
+    Security(String),
+    /// A job exceeded its allotted wall-clock time and was killed.
+    #[error("operation timed out after {0:?}")]
+    Timeout(std::time::Duration),
+    /// The operation was cancelled.
+    #[error("operation cancelled")]
+    Cancelled,
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("ffmpeg error: {0}")]
     Ffmpeg(String),
+    #[error("{0}")]
+    Other(String),
+}
+
+impl MediaError {
+    /// Convenience constructor for ad-hoc messages.
+    pub fn other(msg: impl Into<String>) -> Self {
+        MediaError::Other(msg.into())
+    }
+
+    /// Convenience constructor for security violations.
+    pub fn security(msg: impl Into<String>) -> Self {
+        MediaError::Security(msg.into())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -32,7 +56,7 @@ pub enum ProbeError {
     NoStreams,
     #[error("unknown container format")]
     UnknownFormat,
-    #[error("ffmpeg: {0}")]
+    #[error("ffprobe: {0}")]
     Ffmpeg(String),
 }
 
@@ -42,10 +66,6 @@ pub enum TranscodeError {
     Input(String),
     #[error("output error: {0}")]
     Output(String),
-    #[error("decoder error: {0}")]
-    Decoder(String),
-    #[error("encoder error: {0}")]
-    Encoder(String),
     #[error("no suitable stream found for {0}")]
     NoStream(String),
     #[error("cancelled")]
@@ -60,21 +80,10 @@ pub enum CodecError {
     UnsupportedAudio(AudioCodec),
     #[error("unsupported video codec: {0:?}")]
     UnsupportedVideo(VideoCodec),
-    #[error("codec {0} not available in this build")]
+    #[error("codec {0} not available in this ffmpeg build")]
     NotAvailable(String),
     #[error("container {container:?} does not support codec {codec}")]
-    IncompatibleContainer {
-        container: Container,
-        codec: String,
-    },
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum FilterError {
-    #[error("invalid filter specification: {0}")]
-    InvalidSpec(String),
-    #[error("filter graph error: {0}")]
-    GraphError(String),
+    IncompatibleContainer { container: Container, codec: String },
 }
 
 #[derive(Debug, thiserror::Error)]

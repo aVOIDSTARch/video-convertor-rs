@@ -3,16 +3,11 @@ name = "media-convertor-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Media conversion HTTP API server with async job management"
+description = "media-convertor HTTP API: a thin, locked-down, ffmpeg-only surface over the shared request queue"
 
 [[bin]]
 name = "media-convertor-server"
 path = "src/main.rs"
-
-[features]
-default = []
-ffmpeg = ["media-convertor-core/ffmpeg"]
-bundled = ["media-convertor-core/bundled"]
 
 [dependencies]
 media-convertor-core.workspace = true
