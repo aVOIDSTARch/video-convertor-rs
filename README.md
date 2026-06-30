@@ -107,7 +107,7 @@ Operations only — no admin/lifecycle endpoints. File-producing ops and probe a
 capabilities/presets are answered inline.
 
 | Method | Path | Description |
-|--------|------|-------------|
+| -------- | ------ | ------------- |
 | GET | `/api/v1/health` | Health check (no auth) |
 | GET | `/api/v1/capabilities?kind=` | Discovered capabilities |
 | GET | `/api/v1/presets` | Built-in presets |
@@ -147,7 +147,7 @@ curl -F file=@in.wav -F 'request={"preset":"podcast-mp3"}' \
 ### Configuration (env vars / CLI flags)
 
 | Env | Flag | Default |
-|-----|------|---------|
+| ----- | ------ | --------- |
 | `MEDIA_CONVERTOR_HOST` | `--host` | `127.0.0.1` |
 | `MEDIA_CONVERTOR_PORT` | `--port` | `3400` |
 | `MEDIA_CONVERTOR_WORKERS` | `--workers` | `2` |
