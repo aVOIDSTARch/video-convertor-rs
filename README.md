@@ -17,7 +17,7 @@ supports). Upgrade ffmpeg and the new capabilities appear automatically.
 
 ## Architecture
 
-```
+``` bash
             ┌──────────────────────── media-convertor-core (lib.rs) ───────────────────────┐
             │  ffmpeg/  — locate · capabilities · command builder · run (progress/timeout)  │
             │  operation + dispatch — structured ops + gated raw, routed from requests      │
@@ -40,7 +40,7 @@ API  ───────┤  security — path confinement · protocol denylis
 
 ## Workspace
 
-```
+``` bash
 crates/
   core/       # media-convertor-core — the library (engine, queue, ops, security)
   cli/        # media-convertor       — control-plane CLI (local + remote + server mgmt)
@@ -168,7 +168,7 @@ use media_convertor_core::ffmpeg::command::{transcode_args, Trim};
 use media_convertor_core::operation::ConvertRequest;
 use media_convertor_core::progress::NoProgress;
 
-let engine = Engine::new(&Config::default())?;          // locates ffmpeg, discovers caps
+let engine = Engine::new(&Config::default())?;  // locates ffmpeg, discovers caps
 let fmt = ConvertRequest { preset: Some("web-mp4".into()), ..Default::default() }
     .build_format(None)?;
 let args = transcode_args("in.mov".as_ref(), "out.mp4".as_ref(), &fmt, &Trim::default());
