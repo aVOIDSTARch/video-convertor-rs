@@ -42,12 +42,24 @@ pub struct Config {
     pub token: Option<String>,
 }
 
+/// Default base work directory: `~/.media-convertor` when a home directory is known,
+/// otherwise `$TMPDIR/media-convertor`. Chosen to be stable across reboots so a
+/// background server's queue, uploads, outputs, and pidfile persist.
+fn default_work_dir() -> PathBuf {
+    if let Some(home) = std::env::var_os("HOME") {
+        if !home.is_empty() {
+            return PathBuf::from(home).join(".media-convertor");
+        }
+    }
+    std::env::temp_dir().join("media-convertor")
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             ffmpeg_path: None,
             ffprobe_path: None,
-            work_dir: std::env::temp_dir().join("media-convertor"),
+            work_dir: default_work_dir(),
             workers: 2,
             job_timeout_secs: 3600,
             threads: 0,
@@ -137,6 +149,18 @@ mod tests {
         assert!(c.upload_dir().starts_with(&c.work_dir));
         assert!(c.output_dir().starts_with(&c.work_dir));
         assert!(c.jobs_dir().starts_with(&c.work_dir));
+    }
+
+    #[test]
+    fn default_work_dir_is_stable() {
+        let c = Config::default();
+        // Ends in `.media-convertor` (under $HOME) or `media-convertor` (temp fallback).
+        let name = c.work_dir.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        assert!(
+            name == ".media-convertor" || name == "media-convertor",
+            "unexpected default work dir: {}",
+            c.work_dir.display()
+        );
     }
 
     #[test]

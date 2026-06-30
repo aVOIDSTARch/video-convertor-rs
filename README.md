@@ -11,9 +11,9 @@ supports). Upgrade ffmpeg and the new capabilities appear automatically.
 
 ## Project Information
 
-- **Author:** Louis Casinelli Jr
-- **Language:** Rust (edition 2021)
-- **Repository:** https://github.com/aVOIDSTARch/video-convertor-rs
+* **Author:** Louis Casinelli Jr
+* **Language:** Rust (edition 2021)
+* **Repository:** <https://github.com/aVOIDSTARch/video-convertor-rs>
 
 ## Architecture
 
@@ -29,12 +29,12 @@ API  ───────┤  security — path confinement · protocol denylis
                          ffmpeg / ffprobe subprocess
 ```
 
-- **CLI = control plane.** Runs every operation locally *and* manages the server
+* **CLI = control plane.** Runs every operation locally *and* manages the server
   (`server start|stop|status`, foreground/background, verbose/quiet). With `--server
   <URL>` it submits the exact same request to a remote API instead.
-- **API = ffmpeg-only.** It exposes conversion operations and job state — never server or
+* **API = ffmpeg-only.** It exposes conversion operations and job state — never server or
   admin controls. Each request is enqueued and processed by the shared queue.
-- **`api_queue.rs` is self-contained** (no ffmpeg dependency): its work item is a
+* **`api_queue.rs` is self-contained** (no ffmpeg dependency): its work item is a
   `UniversalRequest { method, path, query, headers, body, attachments }`, persisted as
   JSON. Drop the module into any project and supply your own `QueueHandler`.
 
@@ -51,8 +51,8 @@ plugin/       # media-convertor-plugin — TTS hub converter (stdin → ffmpeg �
 
 ## Requirements
 
-- Rust 1.75+
-- **FFmpeg 6.0+ installed and on `PATH`** (provides `ffmpeg` and `ffprobe`). No build-time
+* Rust 1.75+
+* **FFmpeg 6.0+ installed and on `PATH`** (provides `ffmpeg` and `ffprobe`). No build-time
   FFmpeg linking — the engine shells out, so any system build works:
   `brew install ffmpeg` / `apt install ffmpeg`.
 
@@ -134,14 +134,14 @@ curl -F file=@in.wav -F 'request={"preset":"podcast-mp3"}' \
 
 ### Security
 
-- **Binds `127.0.0.1` by default.** Any non-loopback bind **requires** a bearer token
+* **Binds `127.0.0.1` by default.** Any non-loopback bind **requires** a bearer token
   (`--token` / `MEDIA_CONVERTOR_TOKEN`); the server refuses otherwise.
-- No shell is ever invoked — ffmpeg runs from an argument vector with
+* No shell is ever invoked — ffmpeg runs from an argument vector with
   `-nostdin -protocol_whitelist file,crypto`.
-- Uploads are size-limited, filenames sanitized, and all I/O confined to managed work
+* Uploads are size-limited, filenames sanitized, and all I/O confined to managed work
   dirs (traversal/symlink escapes rejected).
-- Per-job wall-clock timeout kills runaway processes.
-- The **raw passthrough is disabled by default**; when enabled it still runs under an
+* Per-job wall-clock timeout kills runaway processes.
+* The **raw passthrough is disabled by default**; when enabled it still runs under an
   argument allowlist, protocol denylist, and I/O confinement.
 
 ### Configuration (env vars / CLI flags)
@@ -151,7 +151,7 @@ curl -F file=@in.wav -F 'request={"preset":"podcast-mp3"}' \
 | `MEDIA_CONVERTOR_HOST` | `--host` | `127.0.0.1` |
 | `MEDIA_CONVERTOR_PORT` | `--port` | `3400` |
 | `MEDIA_CONVERTOR_WORKERS` | `--workers` | `2` |
-| `MEDIA_CONVERTOR_DATA` | `--work-dir` | `$TMPDIR/media-convertor` |
+| `MEDIA_CONVERTOR_DATA` | `--work-dir` | `~/.media-convertor` |
 | `MEDIA_CONVERTOR_TIMEOUT` | — | `3600` (seconds, 0 = none) |
 | `MEDIA_CONVERTOR_TOKEN` | `--token` | none |
 | `MEDIA_CONVERTOR_RAW` | `--enable-raw` | off |
