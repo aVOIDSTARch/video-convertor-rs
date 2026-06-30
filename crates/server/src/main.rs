@@ -1,29 +1,8 @@
-//! media-convertor HTTP server.
+//! media-convertor HTTP API binary — a thin wrapper that builds state from the
+//! environment and serves the router. All logic lives in the library
+//! ([`media_convertor_server`]) so it can be integration-tested.
 
-mod routes;
-mod state;
-
-use axum::routing::{delete, get, post};
-use axum::Router;
-use state::AppState;
-use std::path::PathBuf;
-use tower_http::cors::CorsLayer;
-use tower_http::trace::TraceLayer;
-
-fn build_app(state: AppState) -> Router {
-    Router::new()
-        .route("/api/v1/health", get(routes::health))
-        .route("/api/v1/presets", get(routes::list_presets))
-        .route("/api/v1/formats", get(routes::list_formats))
-        .route("/api/v1/probe", post(routes::probe))
-        .route("/api/v1/convert", post(routes::submit_convert))
-        .route("/api/v1/jobs/{id}/status", get(routes::job_status))
-        .route("/api/v1/jobs/{id}/result", get(routes::job_result))
-        .route("/api/v1/jobs/{id}", delete(routes::delete_job))
-        .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
-        .with_state(state)
-}
+use media_convertor_server::{build_app, build_state, config_from_env};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -34,36 +13,29 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let port: u16 = std::env::var("MEDIA_CONVERTOR_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(3400);
+    let config = config_from_env();
+    config.validate_server()?;
 
-    let data_dir = std::env::var("MEDIA_CONVERTOR_DATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::temp_dir().join("media-convertor"));
+    let state = build_state(config)?;
+    let (host, port, workers, raw) = (
+        state.config.host.clone(),
+        state.config.port,
+        state.config.workers,
+        state.config.raw_enabled,
+    );
 
-    let upload_dir = data_dir.join("uploads");
-    let output_dir = data_dir.join("output");
-    tokio::fs::create_dir_all(&upload_dir).await?;
-    tokio::fs::create_dir_all(&output_dir).await?;
-
-    let state = AppState::new(upload_dir, output_dir);
     let app = build_app(state);
 
-    let addr = format!("0.0.0.0:{port}");
-    tracing::info!("media-convertor server listening on {addr}");
+    let addr = format!("{host}:{port}");
+    tracing::info!("media-convertor server listening on {addr} ({workers} workers, raw={raw})");
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
-
     Ok(())
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to listen for ctrl-c");
+    let _ = tokio::signal::ctrl_c().await;
     tracing::info!("shutting down");
 }

@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use media_convertor_core::api_queue::{Attachment, JobResult, ProgressReporter, UniversalRequest};
 use media_convertor_core::{Config, Engine, FfmpegHandler};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use uuid::Uuid;
 
 /// A progress reporter backed by an indicatif bar (or nothing, when quiet).
@@ -92,7 +92,7 @@ pub fn run(
 }
 
 /// Move a file, falling back to copy+remove across filesystem boundaries.
-fn move_file(from: &Path, to: &PathBuf) -> Result<()> {
+fn move_file(from: &Path, to: &Path) -> Result<()> {
     if let Some(parent) = to.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent).ok();

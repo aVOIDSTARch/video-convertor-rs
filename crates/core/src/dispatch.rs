@@ -149,8 +149,10 @@ impl FfmpegHandler {
         let list_path = self.output_dir.join(format!("{job_id}.concat.txt"));
         let mut list = String::new();
         for att in &request.attachments {
-            // concat demuxer list format; single-quote and escape embedded quotes.
-            let p = att.path.to_string_lossy().replace('\'', "'\\''");
+            // ffmpeg resolves concat list entries relative to the list file's directory,
+            // so use absolute paths. Single-quote and escape embedded quotes.
+            let abs = std::fs::canonicalize(&att.path).unwrap_or_else(|_| att.path.clone());
+            let p = abs.to_string_lossy().replace('\'', "'\\''");
             list.push_str(&format!("file '{p}'\n"));
         }
         std::fs::write(&list_path, list)?;

@@ -1,126 +1,193 @@
 # video-convertor-rs
 
-A Rust media conversion library and toolset powered by FFmpeg. Handles audio and video transcoding, probing, normalization, and format conversion. Works standalone for general media tasks and integrates with the Alexandria TTS hub as a `converter` plugin for audio format conversion.
+A comprehensive, secure Rust **shell over FFmpeg**. One importable library backs two
+binaries — a **CLI control plane** and a **thin, locked-down HTTP API** — and everything
+flows through a **reusable, persistent request queue**.
+
+Rather than hand-maintaining codec/format lists, the engine wraps the system
+`ffmpeg`/`ffprobe` binaries and **discovers their full capability set at runtime** (every
+encoder, decoder, filter, muxer, demuxer, pixel format, and protocol the installed build
+supports). Upgrade ffmpeg and the new capabilities appear automatically.
 
 ## Project Information
 
 - **Author:** Louis Casinelli Jr
-- **Created:** March 14, 2026
-- **Language:** Rust
+- **Language:** Rust (edition 2021)
 - **Repository:** https://github.com/aVOIDSTARch/video-convertor-rs
 
-## Workspace Structure
+## Architecture
+
+```
+            ┌──────────────────────── media-convertor-core (lib.rs) ───────────────────────┐
+            │  ffmpeg/  — locate · capabilities · command builder · run (progress/timeout)  │
+            │  operation + dispatch — structured ops + gated raw, routed from requests      │
+CLI  ───────┤  api_queue.rs — reusable, persistent queue of universal HTTP-shaped requests  │
+API  ───────┤  security — path confinement · protocol denylist · raw allowlist · tokens     │
+            └──────────────────────────────────────────────────────────────────────────────┘
+                                   │ FfmpegHandler (QueueHandler)
+                                   ▼
+                         ffmpeg / ffprobe subprocess
+```
+
+- **CLI = control plane.** Runs every operation locally *and* manages the server
+  (`server start|stop|status`, foreground/background, verbose/quiet). With `--server
+  <URL>` it submits the exact same request to a remote API instead.
+- **API = ffmpeg-only.** It exposes conversion operations and job state — never server or
+  admin controls. Each request is enqueued and processed by the shared queue.
+- **`api_queue.rs` is self-contained** (no ffmpeg dependency): its work item is a
+  `UniversalRequest { method, path, query, headers, body, attachments }`, persisted as
+  JSON. Drop the module into any project and supply your own `QueueHandler`.
+
+## Workspace
 
 ```
 crates/
-  core/       # media-convertor-core — library with codecs, containers, presets, transcode engine
-  cli/        # media-convertor-cli — command-line interface with progress bars
-  server/     # media-convertor-server — Axum HTTP API with async job tracking
-  mcp/        # media-convertor-mcp — MCP server (stdio JSON-RPC)
-plugin/       # TTS hub converter plugin (stdin → core → stdout)
+  core/       # media-convertor-core — the library (engine, queue, ops, security)
+  cli/        # media-convertor       — control-plane CLI (local + remote + server mgmt)
+  server/     # media-convertor-server — thin, locked-down HTTP API
+  mcp/        # media-convertor-mcp    — MCP stdio JSON-RPC server
+plugin/       # media-convertor-plugin — TTS hub converter (stdin → ffmpeg → stdout)
 ```
+
+## Requirements
+
+- Rust 1.75+
+- **FFmpeg 6.0+ installed and on `PATH`** (provides `ffmpeg` and `ffprobe`). No build-time
+  FFmpeg linking — the engine shells out, so any system build works:
+  `brew install ffmpeg` / `apt install ffmpeg`.
 
 ## Building
 
-FFmpeg is compiled from source via the `bundled` feature flag. The default build compiles without FFmpeg for fast iteration on non-FFmpeg code.
-
 ```bash
-# Quick build (no FFmpeg, for development)
-cargo build --workspace
-
-# Full build with bundled FFmpeg (first build compiles FFmpeg from source)
-cargo build --workspace --features bundled
-
-# Run tests
-cargo test -p media-convertor-core
+cargo build --workspace          # builds everything; no special features needed
+cargo test  -p media-convertor-core
 ```
 
-## CLI Usage
+## CLI usage
 
 ```bash
-# Convert with a preset
-media-convertor convert input.wav -o output.mp3 --preset podcast-mp3
+# Convert with a preset, or with explicit options
+media-convertor convert in.wav -o out.mp3 --preset podcast-mp3
+media-convertor convert in.mov -o out.mkv --video-codec h265 --crf 22 \
+                                          --audio-codec opus --audio-bitrate 128k
 
-# Probe media file info
-media-convertor probe video.mp4 --json
-
-# List available presets
+# Probe, presets, and runtime-discovered capabilities
+media-convertor probe video.mp4
 media-convertor presets
+media-convertor capabilities encoders     # all|encoders|decoders|filters|muxers|demuxers|...
 
-# List supported formats and codecs
-media-convertor formats
+# More operations
+media-convertor extract-audio movie.mkv -o track.m4a --codec aac
+media-convertor thumbnail movie.mkv -o thumb.jpg --time 5 --width 320
+media-convertor filter in.mp4 -o out.mp4 --graph "scale=640:-2,fps=30"
+media-convertor concat -o joined.mkv a.mkv b.mkv c.mkv
+media-convertor raw in.mp4 -o out.mp4 --enable-raw -- -vf hue=s=0 -c:v libx264
 
-# Batch conversion from manifest file
-media-convertor batch manifest.txt
+# Batch (manifest lines: INPUT OUTPUT [PRESET])
+media-convertor batch jobs.txt
+
+# Talk to a remote server instead of running locally (identical request, dual-mode)
+media-convertor --server http://host:3400 convert in.wav -o out.mp3 --preset podcast-mp3
 ```
 
-## Presets
-
-| Name | Type | Description |
-|------|------|-------------|
-| `podcast-mp3` | Audio | MP3 128kbps, 44.1kHz, mono |
-| `audiobook-m4b` | Audio | AAC 64kbps, 44.1kHz, mono, M4B container |
-| `hq-flac` | Audio | FLAC, 48kHz, stereo |
-| `opus-voice` | Audio | Opus 32kbps, 48kHz, mono |
-| `cd-wav` | Audio | PCM 16-bit, 44.1kHz, stereo |
-| `web-mp4` | Video | H.264 CRF 23, AAC 128k, MP4 |
-| `hq-h265` | Video | H.265 CRF 20, Opus 192k, MKV |
-| `social-720p` | Video | H.264, 720p, AAC 128k |
-| `4k-h265` | Video | H.265, 3840x2160, CRF 18 |
-| `webm-vp9` | Video | VP9 CRF 30, Opus 128k, WebM |
-| `gif` | Video | GIF, 480px, 15fps |
-| `thumbnail` | Extract | JPEG still frame |
-| `extract-audio` | Extract | Copy audio, strip video |
-| `prores-edit` | Video | ProRes 422, PCM, MOV |
-
-## HTTP Server
+### Managing the server from the CLI
 
 ```bash
-media-convertor-server
-# Default: http://127.0.0.1:3000
+media-convertor server start --workers 4            # background daemon (pidfile)
+media-convertor server start --foreground -v        # foreground, verbose
+media-convertor server start --host 0.0.0.0 --token "$TOKEN"   # remote bind (token required)
+media-convertor server start --enable-raw           # allow the gated raw op
+media-convertor server status
+media-convertor server stop
 ```
+
+## HTTP API
+
+Operations only — no admin/lifecycle endpoints. File-producing ops and probe are queued;
+capabilities/presets are answered inline.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/api/v1/convert` | Submit conversion job (multipart: file + preset) |
-| GET | `/api/v1/jobs/{id}/status` | Poll job status |
-| GET | `/api/v1/jobs/{id}/result` | Download converted file |
-| DELETE | `/api/v1/jobs/{id}` | Delete job and files |
-| POST | `/api/v1/probe` | Probe media file (multipart) |
-| GET | `/api/v1/presets` | List presets |
-| GET | `/api/v1/formats` | List formats and codecs |
-| GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/health` | Health check (no auth) |
+| GET | `/api/v1/capabilities?kind=` | Discovered capabilities |
+| GET | `/api/v1/presets` | Built-in presets |
+| POST | `/api/v1/convert` | Transcode (multipart: `file` + JSON `request`) |
+| POST | `/api/v1/extract-audio` | Extract audio track |
+| POST | `/api/v1/thumbnail` | Single-frame thumbnail |
+| POST | `/api/v1/filter` | Apply a video filtergraph |
+| POST | `/api/v1/concat` | Concatenate multiple `file*` parts |
+| POST | `/api/v1/probe` | Probe a file |
+| POST | `/api/v1/raw` | Gated raw passthrough (if enabled) |
+| GET | `/api/v1/jobs/{id}/status` | Poll status/progress |
+| GET | `/api/v1/jobs/{id}/result` | Download output (or inline JSON) |
+| DELETE | `/api/v1/jobs/{id}` | Delete job + files |
 
-## MCP Server
+`request` is a JSON object matching the operation (for `convert` it is the full
+`ConvertRequest`: `preset`, `format`, codecs, `crf`, `audio_bitrate`, `width/height`,
+`fps`, `sample_rate`, `channels`, copy/strip flags, `start/end/duration`).
 
-Stdio JSON-RPC server exposing `convert`, `probe`, `extract_audio`, `presets`, and `formats` tools.
+```bash
+curl -F file=@in.wav -F 'request={"preset":"podcast-mp3"}' \
+     http://127.0.0.1:3400/api/v1/convert
+# → {"job_id":"…","status":"queued"} ; then poll /status and GET /result
+```
+
+### Security
+
+- **Binds `127.0.0.1` by default.** Any non-loopback bind **requires** a bearer token
+  (`--token` / `MEDIA_CONVERTOR_TOKEN`); the server refuses otherwise.
+- No shell is ever invoked — ffmpeg runs from an argument vector with
+  `-nostdin -protocol_whitelist file,crypto`.
+- Uploads are size-limited, filenames sanitized, and all I/O confined to managed work
+  dirs (traversal/symlink escapes rejected).
+- Per-job wall-clock timeout kills runaway processes.
+- The **raw passthrough is disabled by default**; when enabled it still runs under an
+  argument allowlist, protocol denylist, and I/O confinement.
+
+### Configuration (env vars / CLI flags)
+
+| Env | Flag | Default |
+|-----|------|---------|
+| `MEDIA_CONVERTOR_HOST` | `--host` | `127.0.0.1` |
+| `MEDIA_CONVERTOR_PORT` | `--port` | `3400` |
+| `MEDIA_CONVERTOR_WORKERS` | `--workers` | `2` |
+| `MEDIA_CONVERTOR_DATA` | `--work-dir` | `$TMPDIR/media-convertor` |
+| `MEDIA_CONVERTOR_TIMEOUT` | — | `3600` (seconds, 0 = none) |
+| `MEDIA_CONVERTOR_TOKEN` | `--token` | none |
+| `MEDIA_CONVERTOR_RAW` | `--enable-raw` | off |
+
+The persistent queue stores each job as `jobs/{id}.json`; on restart, in-flight jobs are
+re-queued (nothing is lost), and uploaded inputs live under `uploads/`, outputs under
+`output/`.
+
+## Using the library
+
+```rust
+use media_convertor_core::{Config, Engine};
+use media_convertor_core::ffmpeg::command::{transcode_args, Trim};
+use media_convertor_core::operation::ConvertRequest;
+use media_convertor_core::progress::NoProgress;
+
+let engine = Engine::new(&Config::default())?;          // locates ffmpeg, discovers caps
+let fmt = ConvertRequest { preset: Some("web-mp4".into()), ..Default::default() }
+    .build_format(None)?;
+let args = transcode_args("in.mov".as_ref(), "out.mp4".as_ref(), &fmt, &Trim::default());
+engine.run(&args, None, &mut NoProgress, None)?;
+```
+
+The reusable [`api_queue`] module can back any project that needs a durable queue of
+HTTP-shaped requests — implement `QueueHandler` for your own work.
+
+## MCP server
+
+Stdio JSON-RPC exposing `convert`, `probe`, `extract_audio`, `presets`, and
+`capabilities` tools.
 
 ```bash
 media-convertor-mcp
 ```
 
-## TTS Hub Plugin
+## TTS hub plugin
 
-The `plugin/` directory contains a converter plugin for the Alexandria TTS hub. It reads audio from stdin, converts via the core library, and writes to stdout.
-
-```toml
-# plugin/plugin.toml
-name = "media-convertor"
-type = "converter"
-```
-
-Options are passed via `PLUGIN_OPT_*` environment variables: `PLUGIN_OPT_CODEC`, `PLUGIN_OPT_BITRATE`, `PLUGIN_OPT_SAMPLE_RATE`, `PLUGIN_OPT_CHANNELS`, `PLUGIN_OPT_PRESET`.
-
-## Feature Flags
-
-| Feature | Description |
-|---------|-------------|
-| `ffmpeg` | Enable FFmpeg-dependent code (probe, transcode, audio/video ops) |
-| `bundled` | Compile FFmpeg from source with x264, x265, opus, vorbis, fdk-aac, dav1d |
-| `system-ffmpeg` | Link against system-installed FFmpeg |
-
-## Requirements
-
-- Rust 1.75+
-- For `bundled` feature: C compiler, nasm/yasm (FFmpeg build dependencies)
-- For `system-ffmpeg` feature: FFmpeg development libraries installed on the system
+`plugin/` reads audio on stdin, converts via the engine, and writes to stdout. Options via
+`PLUGIN_OPT_*` (`CODEC`, `BITRATE`, `SAMPLE_RATE`, `CHANNELS`, `PRESET`).

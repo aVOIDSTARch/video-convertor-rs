@@ -1,77 +1,22 @@
-//! Shared application state and job tracking.
+//! Shared server state: the persistent queue plus the handler used for inline ops.
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use uuid::Uuid;
+use media_convertor_core::api_queue::{ProgressReporter, Queue};
+use media_convertor_core::{Config, FfmpegHandler};
+use std::sync::Arc;
 
-/// Shared application state.
+/// Shared application state, cloned into every request handler.
 #[derive(Clone)]
 pub struct AppState {
-    pub jobs: Arc<RwLock<HashMap<Uuid, Job>>>,
-    pub upload_dir: PathBuf,
-    pub output_dir: PathBuf,
+    pub config: Arc<Config>,
+    pub queue: Arc<Queue>,
+    /// The same handler the queue uses, kept for synchronous inline ops
+    /// (capabilities/presets) that need no queueing.
+    pub handler: Arc<FfmpegHandler>,
 }
 
-impl AppState {
-    pub fn new(upload_dir: PathBuf, output_dir: PathBuf) -> Self {
-        Self {
-            jobs: Arc::new(RwLock::new(HashMap::new())),
-            upload_dir,
-            output_dir,
-        }
-    }
+/// A no-op progress reporter for synchronous inline operations.
+pub struct NoReporter;
 
-    pub fn insert_job(&self, job: Job) -> Uuid {
-        let id = job.id;
-        self.jobs.write().unwrap().insert(id, job);
-        id
-    }
-
-    pub fn get_job(&self, id: &Uuid) -> Option<Job> {
-        self.jobs.read().unwrap().get(id).cloned()
-    }
-
-    pub fn update_status(&self, id: &Uuid, status: JobStatus) {
-        if let Some(job) = self.jobs.write().unwrap().get_mut(id) {
-            job.status = status;
-        }
-    }
-}
-
-/// A conversion job tracked by the server.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Job {
-    pub id: Uuid,
-    pub status: JobStatus,
-    pub input_path: PathBuf,
-    pub output_path: Option<PathBuf>,
-    pub preset: Option<String>,
-    pub error: Option<String>,
-    pub progress: f64,
-}
-
-impl Job {
-    pub fn new(input_path: PathBuf) -> Self {
-        Self {
-            id: Uuid::new_v4(),
-            status: JobStatus::Queued,
-            input_path,
-            output_path: None,
-            preset: None,
-            error: None,
-            progress: 0.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum JobStatus {
-    Queued,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
+impl ProgressReporter for NoReporter {
+    fn report(&self, _progress: f64) {}
 }

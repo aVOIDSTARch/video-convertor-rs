@@ -137,11 +137,13 @@ fn handle_tools_list(id: Option<Value>) -> Value {
                     }
                 },
                 {
-                    "name": "formats",
-                    "description": "List supported formats and codecs",
+                    "name": "capabilities",
+                    "description": "List the installed ffmpeg's capabilities (encoders, decoders, filters, muxers, demuxers), discovered at runtime",
                     "inputSchema": {
                         "type": "object",
-                        "properties": {}
+                        "properties": {
+                            "kind": { "type": "string", "description": "all|encoders|decoders|filters|muxers|demuxers" }
+                        }
                     }
                 }
             ]
@@ -161,7 +163,7 @@ fn handle_tools_call(id: Option<Value>, params: &Value) -> Value {
         "probe" => tool_probe(&arguments),
         "extract_audio" => tool_extract_audio(&arguments),
         "presets" => tool_presets(),
-        "formats" => tool_formats(),
+        "capabilities" => tool_capabilities(&arguments),
         _ => Err(format!("unknown tool: {tool_name}")),
     };
 
@@ -182,134 +184,83 @@ fn handle_tools_call(id: Option<Value>, params: &Value) -> Value {
     }
 }
 
+use media_convertor_core::ffmpeg::command::{self, Trim};
+use media_convertor_core::operation::ConvertRequest;
+use media_convertor_core::progress::NoProgress;
+use media_convertor_core::{Config, Container, Engine, Preset};
+use std::path::Path;
+use std::sync::OnceLock;
+
+/// Lazily-built shared engine (locates ffmpeg + discovers capabilities once).
+fn engine() -> Result<&'static Engine, String> {
+    static ENGINE: OnceLock<Engine> = OnceLock::new();
+    if let Some(e) = ENGINE.get() {
+        return Ok(e);
+    }
+    let engine = Engine::new(&Config::default()).map_err(|e| e.to_string())?;
+    Ok(ENGINE.get_or_init(|| engine))
+}
+
 fn tool_convert(args: &Value) -> Result<String, String> {
-    let input_path = args
-        .get("input_path")
-        .and_then(|v| v.as_str())
-        .ok_or("missing input_path")?;
-    let output_path = args
-        .get("output_path")
-        .and_then(|v| v.as_str())
-        .ok_or("missing output_path")?;
-    let preset_name = args.get("preset").and_then(|v| v.as_str());
+    let input_path = args.get("input_path").and_then(Value::as_str).ok_or("missing input_path")?;
+    let output_path = args.get("output_path").and_then(Value::as_str).ok_or("missing output_path")?;
+    let output = Path::new(output_path);
 
-    let format = if let Some(name) = preset_name {
-        let preset = media_convertor_core::preset::Preset::by_name(name)
-            .ok_or_else(|| format!("unknown preset: {name}"))?;
-        preset.format.clone()
-    } else {
-        // Infer from output extension
-        let container = media_convertor_core::container::Container::from_path(
-            std::path::Path::new(output_path),
-        )
-        .ok_or("cannot determine format from output extension")?;
-        media_convertor_core::format::MediaFormat::remux(container)
+    let preset = args.get("preset").and_then(Value::as_str).map(str::to_string);
+    let hint = Container::from_path(output);
+    let cr = ConvertRequest {
+        preset: preset.clone(),
+        format: if preset.is_none() { hint.map(|c| c.extension().to_string()) } else { None },
+        video_codec: args.get("video_codec").and_then(Value::as_str).map(str::to_string),
+        audio_codec: args.get("audio_codec").and_then(Value::as_str).map(str::to_string),
+        crf: args.get("crf").and_then(Value::as_u64).map(|v| v as u8),
+        audio_bitrate: args.get("audio_bitrate").and_then(Value::as_u64).map(|v| v.to_string()),
+        ..Default::default()
     };
+    let fmt = cr.build_format(hint).map_err(|e| e.to_string())?;
+    let cmd = command::transcode_args(Path::new(input_path), output, &fmt, &Trim::default());
 
-    #[cfg(feature = "ffmpeg")]
-    {
-        let job = media_convertor_core::transcode::TranscodeJob::new(
-            std::path::PathBuf::from(input_path),
-            std::path::PathBuf::from(output_path),
-            format,
-        );
-        let result = media_convertor_core::transcode::transcode_simple(job)
-            .map_err(|e| e.to_string())?;
-        Ok(format!(
-            "Converted {} -> {} ({} bytes)",
-            input_path, output_path, result.output_size
-        ))
-    }
-
-    #[cfg(not(feature = "ffmpeg"))]
-    {
-        let _ = (input_path, output_path, format);
-        Err("FFmpeg not available in this build".to_string())
-    }
+    let total = engine()?.probe(Path::new(input_path)).ok().and_then(|i| i.duration);
+    engine()?
+        .run(&cmd, total, &mut NoProgress, None)
+        .map_err(|e| e.to_string())?;
+    let size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
+    Ok(format!("Converted {input_path} -> {output_path} ({size} bytes)"))
 }
 
 fn tool_probe(args: &Value) -> Result<String, String> {
-    let path = args
-        .get("path")
-        .and_then(|v| v.as_str())
-        .ok_or("missing path")?;
-
-    #[cfg(feature = "ffmpeg")]
-    {
-        let info = media_convertor_core::detect::probe_file(std::path::Path::new(path))
-            .map_err(|e| e.to_string())?;
-        serde_json::to_string_pretty(&info).map_err(|e| e.to_string())
-    }
-
-    #[cfg(not(feature = "ffmpeg"))]
-    {
-        let _ = path;
-        Err("FFmpeg not available in this build".to_string())
-    }
+    let path = args.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let info = engine()?.probe(Path::new(path)).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&info).map_err(|e| e.to_string())
 }
 
 fn tool_extract_audio(args: &Value) -> Result<String, String> {
-    let input_path = args
-        .get("input_path")
-        .and_then(|v| v.as_str())
-        .ok_or("missing input_path")?;
-    let output_path = args
-        .get("output_path")
-        .and_then(|v| v.as_str())
-        .ok_or("missing output_path")?;
-
-    #[cfg(feature = "ffmpeg")]
-    {
-        media_convertor_core::audio::extract_audio(
-            std::path::Path::new(input_path),
-            std::path::Path::new(output_path),
-        )
+    let input_path = args.get("input_path").and_then(Value::as_str).ok_or("missing input_path")?;
+    let output_path = args.get("output_path").and_then(Value::as_str).ok_or("missing output_path")?;
+    let codec = args.get("codec").and_then(Value::as_str);
+    let cmd = command::extract_audio_args(Path::new(input_path), Path::new(output_path), codec);
+    engine()?
+        .run(&cmd, None, &mut NoProgress, None)
         .map_err(|e| e.to_string())?;
-        Ok(format!("Extracted audio: {} -> {}", input_path, output_path))
-    }
-
-    #[cfg(not(feature = "ffmpeg"))]
-    {
-        let _ = (input_path, output_path);
-        Err("FFmpeg not available in this build".to_string())
-    }
+    Ok(format!("Extracted audio: {input_path} -> {output_path}"))
 }
 
 fn tool_presets() -> Result<String, String> {
-    let presets = media_convertor_core::preset::Preset::all();
-    serde_json::to_string_pretty(presets).map_err(|e| e.to_string())
+    serde_json::to_string_pretty(Preset::all()).map_err(|e| e.to_string())
 }
 
-fn tool_formats() -> Result<String, String> {
-    let containers: Vec<_> = media_convertor_core::container::Container::all()
-        .iter()
-        .map(|c| {
-            json!({
-                "name": format!("{:?}", c),
-                "extension": c.extension(),
-                "supports_video": c.supports_video(),
-                "supports_audio": c.supports_audio(),
-            })
-        })
-        .collect();
-
-    let audio_codecs: Vec<_> = media_convertor_core::codec::AudioCodec::all()
-        .iter()
-        .map(|c| json!({ "name": format!("{:?}", c), "display_name": c.display_name() }))
-        .collect();
-
-    let video_codecs: Vec<_> = media_convertor_core::codec::VideoCodec::all()
-        .iter()
-        .map(|c| json!({ "name": format!("{:?}", c), "display_name": c.display_name() }))
-        .collect();
-
-    let output = json!({
-        "containers": containers,
-        "audio_codecs": audio_codecs,
-        "video_codecs": video_codecs,
-    });
-
-    serde_json::to_string_pretty(&output).map_err(|e| e.to_string())
+fn tool_capabilities(args: &Value) -> Result<String, String> {
+    let caps = engine()?.capabilities();
+    let kind = args.get("kind").and_then(Value::as_str).unwrap_or("all");
+    let value = match kind {
+        "encoders" => json!({ "encoders": caps.encoders }),
+        "decoders" => json!({ "decoders": caps.decoders }),
+        "filters" => json!({ "filters": caps.filters }),
+        "muxers" => json!({ "muxers": caps.muxers }),
+        "demuxers" => json!({ "demuxers": caps.demuxers }),
+        _ => serde_json::to_value(caps).unwrap_or(json!({})),
+    };
+    serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
 }
 
 fn json_rpc_result(id: Option<Value>, result: Value) -> Value {

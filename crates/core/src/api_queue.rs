@@ -255,9 +255,13 @@ impl JobStore {
 }
 
 /// The bounded, persistent queue with its worker pool.
+///
+/// The sender is wrapped in a `Mutex` so the whole queue is `Sync` and can live in shared
+/// application state (e.g. an axum `State`); contention is negligible (a brief lock per
+/// submit).
 pub struct Queue {
     store: JobStore,
-    tx: Sender<Uuid>,
+    tx: Mutex<Sender<Uuid>>,
     workers: Vec<std::thread::JoinHandle<()>>,
 }
 
@@ -281,7 +285,7 @@ impl Queue {
 
         let queue = Self {
             store,
-            tx,
+            tx: Mutex::new(tx),
             workers: handles,
         };
 
@@ -295,7 +299,7 @@ impl Queue {
         let id = job.id;
         self.store.insert(job);
         // Send can only fail if all workers are gone, which never happens while alive.
-        let _ = self.tx.send(id);
+        let _ = self.tx.lock().unwrap().send(id);
         id
     }
 
@@ -357,7 +361,7 @@ impl Queue {
             if let Some(job) = self.store.get(&id) {
                 self.store.persist(&job);
             }
-            let _ = self.tx.send(id);
+            let _ = self.tx.lock().unwrap().send(id);
         }
     }
 }
