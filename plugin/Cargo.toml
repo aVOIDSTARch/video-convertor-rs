@@ -12,3 +12,6 @@ path = "src/main.rs"
 [dependencies]
 media-convertor-core.workspace = true
 uuid.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

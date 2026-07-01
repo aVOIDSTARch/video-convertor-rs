@@ -285,7 +285,12 @@ fn handler() -> Result<&'static FfmpegHandler, String> {
     if let Some(h) = HANDLER.get() {
         return Ok(h);
     }
-    let config = Config::default();
+    let mut config = Config::default();
+    if let Ok(dir) = std::env::var("MEDIA_CONVERTOR_DATA") {
+        if !dir.is_empty() {
+            config.work_dir = dir.into();
+        }
+    }
     config.ensure_dirs().map_err(|e| e.to_string())?;
     let engine = Engine::new(&config).map_err(|e| e.to_string())?;
     let raw_enabled = std::env::var("MEDIA_CONVERTOR_RAW")
