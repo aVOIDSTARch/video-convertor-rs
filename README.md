@@ -124,7 +124,8 @@ capabilities/presets are answered inline.
 
 `request` is a JSON object matching the operation (for `convert` it is the full
 `ConvertRequest`: `preset`, `format`, codecs, `crf`, `audio_bitrate`, `width/height`,
-`fps`, `sample_rate`, `channels`, copy/strip flags, `start/end/duration`).
+`fps`, `sample_rate`, `channels`, `encoder_preset`, `pixel_format`, copy/strip flags,
+`start/end/duration`).
 
 ```bash
 curl -F file=@in.wav -F 'request={"preset":"podcast-mp3"}' \
@@ -180,8 +181,11 @@ HTTP-shaped requests — implement `QueueHandler` for your own work.
 
 ## MCP server
 
-Stdio JSON-RPC exposing `convert`, `probe`, `extract_audio`, `presets`, and
-`capabilities` tools.
+Stdio JSON-RPC exposing every non-admin operation as a tool — `convert`,
+`extract_audio`, `thumbnail`, `filter`, `concat`, `raw`, `probe`, `presets`, and
+`capabilities` — mirroring the CLI/HTTP surface. Server/lifecycle controls are never
+exposed. Each tool dispatches through the shared queue handler. The gated `raw`
+passthrough is only permitted when `MEDIA_CONVERTOR_RAW` is set.
 
 ```bash
 media-convertor-mcp

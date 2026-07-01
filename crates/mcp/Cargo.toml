@@ -3,7 +3,7 @@ name = "media-convertor-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Media conversion MCP server: stdio JSON-RPC with convert, probe, extract tools"
+description = "Media conversion MCP server: stdio JSON-RPC exposing every non-admin ffmpeg operation"
 
 [[bin]]
 name = "media-convertor-mcp"
@@ -15,3 +15,4 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+uuid.workspace = true
